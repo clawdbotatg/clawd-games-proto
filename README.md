@@ -1,167 +1,105 @@
-# 🏗 Scaffold-ETH 2
+# ClawdGames Proto 🎮🦞
 
-<h4 align="center">
-  <a href="https://docs.scaffoldeth.io">Documentation</a> |
-  <a href="https://scaffoldeth.io">Website</a>
-</h4>
+A minimal working prototype of the [ClawdGames](https://clawdgames.xyz) platform.
 
-🧪 An open-source, up-to-date toolkit for building decentralized applications (dapps) on the Ethereum blockchain. It's designed to make it easier for developers to create and deploy smart contracts and build user interfaces that interact with those contracts.
+**Run a lobster. Open a loot box. Win 9× or lose. All verifiable onchain.**
 
-⚙️ Built using NextJS, RainbowKit, Foundry, Wagmi, Viem, and Typescript.
+---
 
-- ✅ **Contract Hot Reload**: Your frontend auto-adapts to your smart contract as you edit it.
-- 🪝 **[Custom hooks](https://docs.scaffoldeth.io/hooks/)**: Collection of React hooks wrapper around [wagmi](https://wagmi.sh/) to simplify interactions with smart contracts with typescript autocompletion.
-- 🧱 [**Components**](https://docs.scaffoldeth.io/components/): Collection of common web3 components to quickly build your frontend.
-- 🔥 **Burner Wallet & Local Faucet**: Quickly test your application with a burner wallet and local faucet.
-- 🔐 **Integration with Wallet Providers**: Connect to different wallet providers and interact with the Ethereum network.
-
-![Debug Contracts tab](https://github.com/scaffold-eth/scaffold-eth-2/assets/55535804/b237af0c-5027-4849-a5c1-2e31495cccb1)
-
-## Requirements
-
-Before you begin, you need to install the following tools:
-
-- [Node (>= v18.17)](https://nodejs.org/en/download/)
-- Yarn ([v1](https://classic.yarnpkg.com/en/docs/install/) or [v2+](https://yarnpkg.com/getting-started/install))
-- [Git](https://git-scm.com/downloads)
-- [Foundryup](https://book.getfoundry.sh/getting-started/installation)
-
-> **Note for Windows users**. Foundryup is not currently supported by Powershell or Cmd, and has issues with Git Bash. You will need to use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) as your terminal.
-
-## Quickstart
-
-To get started with Scaffold-ETH 2, follow the steps below:
-
-1. Clone this repo & install dependencies
+## Architecture
 
 ```
-git clone -b foundry https://github.com/scaffold-eth/scaffold-eth-2.git
-cd scaffold-eth-2
-yarn install && forge install --root packages/foundry
+Player  →  commitPlay(commitment, betAmount)   → tokens locked
+Keeper  →  fulfillSeed(player, keeperSecret)   → seed = keccak256(commitment || secret || blockNumber)
+Frontend→  DeterministicDice(seed) → 5 obstacles + loot box outcome (roll(10)===0 → WIN)
+Player  →  plays run, records moves[]
+Keeper  →  simulate(seed, moves) → isWin → resolve(player, isWin) → payout
 ```
 
-2. Run a local network in the first terminal:
+**Randomness**: Commit-reveal. Player commits first, keeper reveals after. Neither party knows the other's secret at commit time. Final seed = combination of both → neither can manipulate alone.
 
-```
+**Verifiability**: Any run can be replayed with just `seed + moves` at `/simulate`. No trust needed.
+
+---
+
+## Contracts
+
+| Contract | Description |
+|---|---|
+| `MockGameToken` | Freely mintable ERC-20 (testnet only) |
+| `LootBoxGame` | Main game: commit, fulfill, resolve |
+| `GameTokenFeeSplitter` | 80% creator / 20% burn |
+| `DeterministicDice` | Solidity port of [deterministic-dice](https://github.com/austintgriffith/deterministic-dice) |
+
+**Win condition**: `DeterministicDice(seed).roll(100) × 5` (obstacles), then `roll(10) === 0` → WIN (9× payout, 0.9× EV)
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install
+yarn install
+
+# 2. Start local chain (in separate terminal)
 yarn chain
-```
 
-3. On a second terminal, deploy the test contract:
-
-```
+# 3. Deploy contracts
 yarn deploy
-```
 
-4. On a third terminal, start your NextJS app:
+# 4. Start keeper (in separate terminal)
+cd packages/keeper && npm install && npm start
 
-```
+# 5. Start frontend
 yarn start
 ```
 
-Visit your app on: `http://localhost:3000`. You can interact with your smart contract using the `Debug Contracts` page. You can tweak the app config in `packages/nextjs/scaffold.config.ts`.
+Visit [http://localhost:3000](http://localhost:3000)
 
-## Deploying to Live Networks
+---
 
-### Deployment Commands
+## Keeper Service
 
-<details open>
-<summary>Understanding deployment scripts structure</summary>
+The keeper runs at `http://localhost:3001` and does two things:
 
-Scaffold-ETH 2 uses two types of deployment scripts in `packages/foundry/script`:
-
-1. `Deploy.s.sol`: Main deployment script that runs all contracts sequentially
-2. Individual scripts (e.g., `DeployYourContract.s.sol`): Deploy specific contracts
-
-Each script inherits from `ScaffoldETHDeploy` which handles:
-
-- Deployer account setup and funding
-- Contract verification preparation
-- Exporting ABIs and addresses to the frontend
-</details>
-
-<details open>
-<summary>Basic deploy commands</summary>
-  
-  
-1. Deploy to a network (uses `Deploy.s.sol`):
+1. **Watches** for `Committed` events → calls `fulfillSeed(player, randomSecret)`
+2. **HTTP API**: `POST /resolve { playerAddress, seed, moves, betAmount }` → simulate → `resolve(player, isWin)`
 
 ```bash
-yarn deploy --network <network-name>
+cd packages/keeper
+cp .env.example .env
+npm start
 ```
 
-2. Deploy specific contract:
+---
 
-```bash
-yarn deploy --network <network-name> --file DeployYourContract.s.sol
+## Simulate / Replay
+
+Any run is publicly verifiable. Given a `seed` and `moves` array:
+
+```ts
+import { DeterministicDice } from "deterministic-dice";
+const dice = new DeterministicDice(seed);
+const obstacles = Array.from({length: 5}, () => dice.roll(100));
+const isWin = dice.roll(10) === 0; // 1/10 chance
 ```
 
-This will use the `DeployYourContract.s.sol` script to deploy the contract.
+Visit `/simulate?seed=0x...&moves=1240,2800,4100` to replay any run visually.
 
-</details>
+---
 
-<details>
-<summary>Environment-specific behavior</summary>
+## Security Notes
 
-**Local Development (`yarn chain`)**:
+- No private keys in git. Keeper PK is **anvil test key only**.
+- SafeERC20 for all token transfers.
+- Checks-Effects-Interactions pattern throughout.
+- Keeper is trusted for this prototype. Production: use a VRF or decentralized keeper.
 
-- No password needed for deployment if `LOCALHOST_KEYSTORE_ACCOUNT=scaffold-eth-default` is set in `.env` file.
-- Uses Anvil's Account #9 as default keystore account
-- Update `LOCALHOST_KEYSTORE_ACCOUNT` in `.env` to use a different keystore account for deployment
+---
 
-**Live Networks**:
+## Stack
 
-- Requires custom keystore (see "Creating new deployments" below)
-- Will prompt for keystore password
-
-</details>
-
-<details>
-<summary>Creating new deployments</summary>
-
-1. Create your contract in `packages/foundry/contracts`
-2. Create deployment script in `packages/foundry/script` (use existing scripts as templates)
-3. Add to main `Deploy.s.sol` if needed
-4. Deploy using commands above
-</details>
-
-### Generate/Import keystore account
-
-<details>
-<summary>Option 1: Generate new account</summary>
-
-```
-yarn generate
-```
-
-This creates a `scaffold-eth-custom` [keystore](https://book.getfoundry.sh/reference/cli/cast/wallet#cast-wallet) in `~/.foundry/keystores/scaffold-eth-custom` account.
-
-</details>
-
-<details>
-<summary>Option 2: Import existing private key</summary>
-
-```
-yarn account:import
-```
-
-</details>
-
-View your account status:
-
-```
-yarn account
-```
-
-This will ask you to select [keystore](https://book.getfoundry.sh/reference/cli/cast/wallet#cast-wallet) present `~/.foundry/keystores` and show you the balance of selected account on network configured in `packages/foundry/foundry.toml`.
-
-## Documentation
-
-Visit our [docs](https://docs.scaffoldeth.io) to learn how to start building with Scaffold-ETH 2.
-
-To know more about its features, check out our [website](https://scaffoldeth.io).
-
-## Contributing to Scaffold-ETH 2
-
-We welcome contributions to Scaffold-ETH 2!
-
-Please see [CONTRIBUTING.MD](https://github.com/scaffold-eth/scaffold-eth-2/blob/main/CONTRIBUTING.md) for more information and guidelines for contributing to Scaffold-ETH 2.
+- **Contracts**: Solidity 0.8.19, Foundry, OpenZeppelin
+- **Frontend**: Next.js, Wagmi, Viem, Scaffold-ETH 2
+- **Keeper**: Node.js, Ethers v6, Express
+- **Randomness lib**: [deterministic-dice](https://github.com/austintgriffith/deterministic-dice)

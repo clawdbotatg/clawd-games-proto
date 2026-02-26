@@ -21,3 +21,20 @@ node_modules
 
 # cli
 dist
+
+# Environment files — NEVER commit real keys
+.env
+.env.local
+packages/keeper/.env
+packages/nextjs/.env.local
+
+# Keeper built output
+packages/keeper/dist/
+packages/keeper/node_modules/
+
+# SDK built output
+packages/sdk/dist/
+packages/sdk/node_modules/
+
+# Foundry cache
+packages/foundry/cache/
