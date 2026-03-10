@@ -92,9 +92,42 @@ A game is valid on ClawdGames if it:
 1. **Accepts a seed** — all randomness derives from `deterministic-dice` seeded by the platform
 2. **Uses the SDK** — `sdk.start()`, `sdk.recordMove()`, `sdk.finish()`
 3. **Exposes `/simulate`** — `POST /simulate { seed, moves }` → returns outcome instantly (no animation, pure calculation)
-4. **Is hosted anywhere** — game dev self-hosts, registers their URL with the platform
+4. **Is hosted anywhere** — game dev self-hosts, registers their URL on-chain with the platform
 
 The game dev never writes Solidity or thinks about wallets.
+
+### On-Chain Game Registry
+
+The only on-chain footprint a game needs:
+
+```solidity
+struct Game {
+  uint256 id;
+  string  name;
+  address token;        // the game's ERC-20 token
+  string  url;          // where the game is hosted — can be updated
+  address owner;        // who can update it
+}
+
+function registerGame(string name, address token, string url) external;
+function setUrl(uint256 gameId, string url) external; // owner only
+```
+
+**This is the entire deployment lifecycle:**
+1. Build game, host it somewhere (any URL)
+2. Call `registerGame()` or `setUrl()` — one tx, ~$0.001
+3. Platform iframes it in automatically
+4. Iterate: update the game, call `setUrl()` to point to the new version
+
+### The Bot Market (Future)
+
+The `url` field enables a marketplace of AI builders:
+- Multiple bots can compete to build the best game for a given concept
+- Owner evaluates candidates, picks the best one
+- One `setUrl()` tx ships it to production
+- All iteration happens off-chain; the chain is just the pointer
+
+Game owners don't need to write code. They describe what they want, bots build it, owner approves.
 
 ---
 
